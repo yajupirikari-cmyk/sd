@@ -9,6 +9,9 @@ const TOKEN = process.env.DISCORD_TOKEN;
 const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID || '1515109697680576684';
 const PORT = process.env.PORT || 8080;
 
+// ScraperAPIのキー（取得後、Renderの環境変数に設定します）
+const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY;
+
 // 許可されたユーザーのIDリスト
 const AUTHORIZED_USERS = [
     '1486923873004945509',
@@ -52,8 +55,36 @@ const HEADERS = {
     "Upgrade-Insecure-Requests": "1"
 };
 
-// 403エラー回避用のフェッチ関数（Native FetchとGoogle翻訳プロキシのフォールバック）
+// 403エラー回避用のフェッチ関数（Native FetchとGoogle翻訳プロキシ、最終手段のScraperAPI）
 async function fetchWithFallback(targetUrl) {
+    // もしScraperAPIのキーが設定されていれば、最強の外部プロキシを使う
+    if (SCRAPER_API_KEY) {
+        console.log(`ScraperAPIを経由してアクセスします: ${targetUrl}`);
+        try {
+            // premium=false (通常のプロキシ), render=false (JS実行なしで通信のみ)
+            const apiUrl = `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&premium=false&render=false`;
+            // ScraperAPIは少し時間がかかるのでタイムアウトを長めに設定
+            const response = await fetch(apiUrl, { timeout: 30000 });
+            if (!response.ok) {
+                console.error(`ScraperAPIエラー: ${response.status}`);
+                // JSチャレンジで弾かれた場合はJSレンダリングをオンにして再挑戦
+                if (response.status === 403 || response.status === 500) {
+                    console.log("通常アクセスが弾かれたため、JSレンダリング(ブラウザエミュレート)を有効にして再挑戦します...");
+                    const jsApiUrl = `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&premium=true&render=true`;
+                    const jsResponse = await fetch(jsApiUrl, { timeout: 60000 });
+                    if (!jsResponse.ok) throw new Error(`ScraperAPI JSエラー: ${jsResponse.status}`);
+                    return await jsResponse.text();
+                }
+                throw new Error(`ScraperAPI HTTP Error: ${response.status}`);
+            }
+            return await response.text();
+        } catch (apiErr) {
+            console.error("ScraperAPIでの取得に失敗しました:", apiErr.message);
+            throw apiErr;
+        }
+    }
+
+    // APIキーがない場合は今まで通りのフォールバックを試す
     try {
         console.log(`Native Fetchでアクセスを試みます: ${targetUrl}`);
         const response = await fetch(targetUrl, {
@@ -83,7 +114,7 @@ async function fetchWithFallback(targetUrl) {
             if (!proxyResponse.ok) throw new Error(`Proxy HTTP Error: ${proxyResponse.status}`);
             return await proxyResponse.text();
         } catch (fallbackErr) {
-            console.error("すべての取得方法に失敗しました。");
+            console.error("すべての取得方法に失敗しました。APIキーの導入をご検討ください。");
             throw fallbackErr;
         }
     }
