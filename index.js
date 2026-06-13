@@ -58,16 +58,23 @@ async function fetchWithFallback(targetUrl) {
         const response = await axios.get(targetUrl, { headers: HEADERS, timeout: 10000 });
         return response.data;
     } catch (error) {
-        // 403 (Forbidden) やその他のエラーで弾かれた場合、プロキシサービスを経由する
+        // 403 (Forbidden) やその他のエラーで弾かれた場合、複数のプロキシサービスを経由する
         if (error.response && (error.response.status === 403 || error.response.status === 401)) {
-            console.log(`直接アクセスが弾かれました (403)。プロキシ経由で取得を試みます: ${targetUrl}`);
+            console.log(`直接アクセスが弾かれました(403)。プロキシ1(codetabs)を試します: ${targetUrl}`);
             try {
-                const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
-                const proxyResponse = await axios.get(proxyUrl, { timeout: 15000 });
-                return proxyResponse.data;
-            } catch (proxyErr) {
-                console.error("プロキシ経由でも取得できませんでした:", proxyErr.message);
-                throw proxyErr;
+                const proxyUrl1 = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`;
+                const proxyResponse1 = await axios.get(proxyUrl1, { timeout: 15000 });
+                return proxyResponse1.data;
+            } catch (proxyErr1) {
+                console.log(`プロキシ1失敗。プロキシ2(corsproxy)を試します: ${targetUrl}`);
+                try {
+                    const proxyUrl2 = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+                    const proxyResponse2 = await axios.get(proxyUrl2, { headers: HEADERS, timeout: 15000 });
+                    return proxyResponse2.data;
+                } catch (proxyErr2) {
+                    console.error("すべてのプロキシで取得に失敗しました。");
+                    throw proxyErr2;
+                }
             }
         }
         throw error;
