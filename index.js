@@ -61,19 +61,23 @@ async function fetchWithFallback(targetUrl) {
     if (SCRAPER_API_KEY) {
         console.log(`ScraperAPIを経由してアクセスします: ${targetUrl}`);
         try {
-            // premium=false (通常のプロキシ), render=false (JS実行なしで通信のみ)
-            const apiUrl = `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&premium=false&render=false`;
-            // ScraperAPIは少し時間がかかるのでタイムアウトを長めに設定
+            // premium=true (高品質プロキシ), render=false (JS実行なしで通信のみ), country_code=jp (日本IP)
+            const apiUrl = `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&premium=true&render=false&country_code=jp`;
             const response = await fetch(apiUrl, { timeout: 30000 });
             if (!response.ok) {
                 console.error(`ScraperAPIエラー: ${response.status}`);
                 // JSチャレンジで弾かれた場合はJSレンダリングをオンにして再挑戦
                 if (response.status === 403 || response.status === 500) {
-                    console.log("通常アクセスが弾かれたため、JSレンダリング(ブラウザエミュレート)を有効にして再挑戦します...");
-                    const jsApiUrl = `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&premium=true&render=true`;
-                    const jsResponse = await fetch(jsApiUrl, { timeout: 60000 });
+                    console.log("通常アクセスが弾かれたため、JSレンダリング(ブラウザエミュレート)と日本IPを有効にして再挑戦します...");
+                    const jsApiUrl = `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&premium=true&render=true&country_code=jp`;
+                    const jsResponse = await fetch(jsApiUrl, { timeout: 90000 });
                     if (!jsResponse.ok) throw new Error(`ScraperAPI JSエラー: ${jsResponse.status}`);
-                    return await jsResponse.text();
+                    
+                    const html = await jsResponse.text();
+                    if (html.includes("Cloudflare") || html.includes("Just a moment") || html.includes("Checking your browser")) {
+                        console.error("【注意】ScraperAPIのブラウザがCloudflareのパズル検証画面でブロックされています。");
+                    }
+                    return html;
                 }
                 throw new Error(`ScraperAPI HTTP Error: ${response.status}`);
             }
