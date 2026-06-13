@@ -2,6 +2,7 @@ const { Client, GatewayIntentBits, Partials, Events } = require('discord.js');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const express = require('express');
+const cloudscraper = require('cloudscraper');
 
 // ================= 設定部分 =================
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -51,33 +52,27 @@ const HEADERS = {
     "Upgrade-Insecure-Requests": "1"
 };
 
-// 403エラー回避用のフェッチ関数（無料のプロキシを経由するフォールバック）
+// 403エラー回避用のフェッチ関数（CloudscraperとGooglebot偽装のフォールバック）
 async function fetchWithFallback(targetUrl) {
     try {
-        // まずは直接アクセスを試す
-        const response = await axios.get(targetUrl, { headers: HEADERS, timeout: 10000 });
-        return response.data;
+        // Cloudflareの強力なBotチェックを回避する専用ライブラリを使用
+        console.log(`Cloudscraper経由でアクセスを試みます: ${targetUrl}`);
+        const html = await cloudscraper.get(targetUrl);
+        return html;
     } catch (error) {
-        // 403 (Forbidden) やその他のエラーで弾かれた場合、複数のプロキシサービスを経由する
-        if (error.response && (error.response.status === 403 || error.response.status === 401)) {
-            console.log(`直接アクセスが弾かれました(403)。プロキシ1(codetabs)を試します: ${targetUrl}`);
-            try {
-                const proxyUrl1 = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`;
-                const proxyResponse1 = await axios.get(proxyUrl1, { timeout: 15000 });
-                return proxyResponse1.data;
-            } catch (proxyErr1) {
-                console.log(`プロキシ1失敗。プロキシ2(corsproxy)を試します: ${targetUrl}`);
-                try {
-                    const proxyUrl2 = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
-                    const proxyResponse2 = await axios.get(proxyUrl2, { headers: HEADERS, timeout: 15000 });
-                    return proxyResponse2.data;
-                } catch (proxyErr2) {
-                    console.error("すべてのプロキシで取得に失敗しました。");
-                    throw proxyErr2;
-                }
-            }
+        console.log(`Cloudscraper失敗。Googlebot偽装で直接アクセスを試します: ${targetUrl}`);
+        try {
+            // Cloudscraperでもダメだった場合のGooglebot偽装フォールバック
+            const googlebotHeaders = {
+                "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            };
+            const response = await axios.get(targetUrl, { headers: googlebotHeaders, timeout: 15000 });
+            return response.data;
+        } catch (fallbackErr) {
+            console.error("すべての取得方法に失敗しました。");
+            throw fallbackErr;
         }
-        throw error;
     }
 }
 
