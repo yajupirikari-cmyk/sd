@@ -52,23 +52,36 @@ const HEADERS = {
     "Upgrade-Insecure-Requests": "1"
 };
 
-// 403エラー回避用のフェッチ関数（CloudscraperとGooglebot偽装のフォールバック）
+// 403エラー回避用のフェッチ関数（Native FetchとGoogle翻訳プロキシのフォールバック）
 async function fetchWithFallback(targetUrl) {
     try {
-        // Cloudflareの強力なBotチェックを回避する専用ライブラリを使用
-        console.log(`Cloudscraper経由でアクセスを試みます: ${targetUrl}`);
-        const html = await cloudscraper.get(targetUrl);
-        return html;
+        console.log(`Native Fetchでアクセスを試みます: ${targetUrl}`);
+        const response = await fetch(targetUrl, {
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+                "Upgrade-Insecure-Requests": "1"
+            }
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP Error: ${response.status}`);
+        }
+        return await response.text();
     } catch (error) {
-        console.log(`Cloudscraper失敗。Googlebot偽装で直接アクセスを試します: ${targetUrl}`);
+        console.log(`Native Fetch失敗。Google翻訳プロキシを試します: ${targetUrl}`);
         try {
-            // Cloudscraperでもダメだった場合のGooglebot偽装フォールバック
-            const googlebotHeaders = {
-                "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-            };
-            const response = await axios.get(targetUrl, { headers: googlebotHeaders, timeout: 15000 });
-            return response.data;
+            const u = new URL(targetUrl);
+            const host = u.hostname.replace(/\./g, '-');
+            const proxyUrl = `https://${host}.translate.goog${u.pathname}${u.search || ''}?_x_tr_sl=en&_x_tr_tl=ja&_x_tr_hl=ja&_x_tr_pto=wapp`;
+            
+            const proxyResponse = await fetch(proxyUrl, {
+                headers: {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                }
+            });
+            if (!proxyResponse.ok) throw new Error(`Proxy HTTP Error: ${proxyResponse.status}`);
+            return await proxyResponse.text();
         } catch (fallbackErr) {
             console.error("すべての取得方法に失敗しました。");
             throw fallbackErr;
@@ -120,8 +133,13 @@ async function getDirectInviteLink(detailUrl) {
 
         $('a[href]').each((i, el) => {
             const href = $(el).attr('href');
-            if (href.includes('discord.gg/') || href.includes('discord.com/invite/')) {
-                inviteLink = href;
+            if (href.includes('discord.gg/') || href.includes('discord.com/invite/') || href.includes('discord-gg.translate.goog') || href.includes('discord-com.translate.goog')) {
+                if (href.includes('translate.goog')) {
+                    const path = new URL(href).pathname;
+                    inviteLink = "https://discord.gg" + path;
+                } else {
+                    inviteLink = href;
+                }
                 return false; // ループを抜ける
             }
         });
