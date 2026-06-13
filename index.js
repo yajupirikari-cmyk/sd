@@ -31,13 +31,12 @@ app.listen(PORT, () => {
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.DirectMessages, // DMを受け取るために必要
-        GatewayIntentBits.MessageContent  // メッセージの中身を読むために必要
+        GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.MessageContent
     ],
-    partials: [Partials.Channel, Partials.Message] // キャッシュされていないDMを受け取るために必要
+    partials: [Partials.Channel, Partials.Message]
 });
 
-// RenderのIPがCloudflare等に弾かれないよう、ブラウザと全く同じヘッダーを設定
 const HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -52,11 +51,34 @@ const HEADERS = {
     "Upgrade-Insecure-Requests": "1"
 };
 
+// 403エラー回避用のフェッチ関数（無料のプロキシを経由するフォールバック）
+async function fetchWithFallback(targetUrl) {
+    try {
+        // まずは直接アクセスを試す
+        const response = await axios.get(targetUrl, { headers: HEADERS, timeout: 10000 });
+        return response.data;
+    } catch (error) {
+        // 403 (Forbidden) やその他のエラーで弾かれた場合、プロキシサービスを経由する
+        if (error.response && (error.response.status === 403 || error.response.status === 401)) {
+            console.log(`直接アクセスが弾かれました (403)。プロキシ経由で取得を試みます: ${targetUrl}`);
+            try {
+                const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+                const proxyResponse = await axios.get(proxyUrl, { timeout: 15000 });
+                return proxyResponse.data;
+            } catch (proxyErr) {
+                console.error("プロキシ経由でも取得できませんでした:", proxyErr.message);
+                throw proxyErr;
+            }
+        }
+        throw error;
+    }
+}
+
 async function getDissokuServers() {
     const url = "https://dissoku.net/ja/servers";
     try {
-        const response = await axios.get(url, { headers: HEADERS, timeout: 15000 });
-        const $ = cheerio.load(response.data);
+        const html = await fetchWithFallback(url);
+        const $ = cheerio.load(html);
         const servers = [];
 
         $('a[href]').each((i, el) => {
@@ -90,8 +112,8 @@ async function getDissokuServers() {
 
 async function getDirectInviteLink(detailUrl) {
     try {
-        const response = await axios.get(detailUrl, { headers: HEADERS, timeout: 15000 });
-        const $ = cheerio.load(response.data);
+        const html = await fetchWithFallback(detailUrl);
+        const $ = cheerio.load(html);
         let inviteLink = null;
 
         $('a[href]').each((i, el) => {
@@ -109,7 +131,6 @@ async function getDirectInviteLink(detailUrl) {
     }
 }
 
-// 指定した数だけサーバーを探してチャンネルに送信する関数
 async function findAndSendServers(count) {
     const channel = client.channels.cache.get(CHANNEL_ID);
     if (!channel) {
@@ -137,7 +158,6 @@ async function findAndSendServers(count) {
         if (foundCount >= count) break;
 
         console.log(`「${server.title}」から直接招待URLを抽出中...`);
-        // 1.5秒待機
         await new Promise(resolve => setTimeout(resolve, 1500));
         
         const inviteUrl = await getDirectInviteLink(server.detail_link);
@@ -154,17 +174,13 @@ async function findAndSendServers(count) {
 client.once(Events.ClientReady, () => {
     console.log(`成功: ${client.user.tag} としてログインしました！`);
     
-    // 初回実行と30分ごとのループ (定期実行は1件ずつ送信)
     findAndSendServers(1);
     setInterval(() => findAndSendServers(1), 30 * 60 * 1000);
 });
 
-// メッセージ受信時の処理（DMでのコマンド）
 client.on(Events.MessageCreate, async (message) => {
-    // Botからのメッセージは無視
     if (message.author.bot) return;
 
-    // DM（サーバー外）かつ、許可されたユーザーかどうか判定
     if (!message.guild && AUTHORIZED_USERS.includes(message.author.id)) {
         if (message.content.startsWith('!pal ')) {
             const args = message.content.split(' ');
